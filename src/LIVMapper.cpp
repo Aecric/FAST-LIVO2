@@ -191,7 +191,23 @@ void LIVMapper::initializeComponents(rclcpp::Node::SharedPtr &node)
   voxelmap_manager->extT_ << VEC_FROM_ARRAY(extrinT);
   voxelmap_manager->extR_ << MAT_FROM_ARRAY(extrinR);
 
-  if (!vk::camera_loader::loadFromRosNs(this->node, "parameter_blackboard", vio_manager->cam)) throw std::runtime_error("Camera model not correctly specified.");
+  // Wait for parameter_blackboard to be ready before loading camera params.
+  // Both nodes start simultaneously so we retry up to 10 times (5 seconds total).
+  {
+    bool cam_loaded = false;
+    for (int attempt = 0; attempt < 10 && !cam_loaded; ++attempt)
+    {
+      cam_loaded = vk::camera_loader::loadFromRosNs(this->node, "parameter_blackboard", vio_manager->cam);
+      if (!cam_loaded)
+      {
+        RCLCPP_WARN(this->node->get_logger(),
+          "Camera model not loaded from parameter_blackboard (attempt %d/10). "
+          "Waiting 500ms for parameter_blackboard to become ready...", attempt + 1);
+        rclcpp::sleep_for(std::chrono::milliseconds(500));
+      }
+    }
+    if (!cam_loaded) throw std::runtime_error("Camera model not correctly specified.");
+  }
 
   vio_manager->grid_size = grid_size;
   vio_manager->patch_size = patch_size;
