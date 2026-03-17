@@ -304,23 +304,23 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   MD(DIM_STATE, DIM_STATE) F_x, cov_w;
   double dt, dt_all = 0.0;
   double offs_t;
-  // double imu_time;
+  double imu_time;
   double tau;
   if (!imu_time_init)
   {
-    // imu_time = stamp2Sec(v_imu.front()->header.stamp) - first_lidar_time;
-    // tau = 1.0 / (0.25 * sin(2 * CV_PI * 0.5 * imu_time) + 0.75);
+    imu_time = stamp2Sec(v_imu.front()->header.stamp) - first_lidar_time;
+    tau = 1.0 / (0.25 * sin(2 * CV_PI * 0.5 * imu_time) + 0.75);
     tau = 1.0;
     imu_time_init = true;
   }
   else
   {
     tau = state_inout.inv_expo_time;
-    // RCLCPP_ERROR_STREAM(rclcpp::get_logger(""),"tau: %.6f !!!!!!", tau);
+    RCLCPP_ERROR(rclcpp::get_logger(""),"tau: %.6f !!!!!!", tau);
   }
-  // state_inout.cov(6, 6) = 0.01;
-  // RCLCPP_ERROR_STREAM(rclcpp::get_logger(""),"lidar_meas.lio_vio_flg");
-  // cout<<"lidar_meas.lio_vio_flg: "<<lidar_meas.lio_vio_flg<<endl;
+  state_inout.cov(6, 6) = 0.01;
+  RCLCPP_ERROR(rclcpp::get_logger(""),"lidar_meas.lio_vio_flg");
+  cout<<"lidar_meas.lio_vio_flg: "<<lidar_meas.lio_vio_flg<<endl;
   switch (lidar_meas.lio_vio_flg)
   {
   case LIO:

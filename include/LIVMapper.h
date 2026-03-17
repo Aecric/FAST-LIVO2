@@ -26,6 +26,8 @@ which is included as part of this source code package.
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <vikit/camera_loader.h>
+#include <cv_bridge/cv_bridge.h>
+#include <opencv2/opencv.hpp>
 
 class LIVMapper
 {
@@ -53,8 +55,10 @@ public:
   void RGBpointBodyToWorld(PointType const *const pi, PointType *const po);
   void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr &msg_in);
+  void lxcamera_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in);
   void img_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg_in);
+  void amp_camera_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg);
   void publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager);
   void publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pubLaserCloudFullRes, VIOManagerPtr vio_manager);
   void publish_visual_sub_map(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pubSubVisualMap);
@@ -75,7 +79,7 @@ public:
   std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map;
   
   string root_dir;
-  string lid_topic, imu_topic, seq_name, img_topic;
+  string lid_topic, imu_topic, seq_name, img_topic ,amp_camera_topic;
   V3D extT;
   M3D extR;
 
@@ -170,6 +174,7 @@ public:
   std::shared_ptr<rclcpp::SubscriptionBase> sub_pcl;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_img;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_amp_camera;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFullRes;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pubNormal;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubSubVisualMap;
@@ -184,6 +189,8 @@ public:
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr mavros_pose_publisher;
   rclcpp::TimerBase::SharedPtr imu_prop_timer;
   rclcpp::Node::SharedPtr node;
+
+  cv::Mat amp_image_;
 
   int frame_num = 0;
   double aver_time_consu = 0;

@@ -57,6 +57,12 @@ void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg
   *pcl_out = pl_surf;
 }
 
+
+void Preprocess::process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, PointCloudXYZI::Ptr &pcl_out , const cv::Mat &img_msg){
+  lxcamera_handler(msg, img_msg);
+  *pcl_out = pl_surf;
+}
+
 void Preprocess::process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, PointCloudXYZI::Ptr &pcl_out)
 {
   switch (lidar_type)
@@ -84,6 +90,10 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &ms
   case ROBOSENSE:
     robosense_handler(msg);
     break;
+
+  // case LXCAMERA:
+  //   lxcamera_handler(msg);
+  //   break;
 
   default:
     printf("Error LiDAR Type: %d \n", lidar_type);
@@ -741,6 +751,87 @@ void Preprocess::robosense_handler(const sensor_msgs::msg::PointCloud2::ConstSha
   std::sort(pl_surf.points.begin(), pl_surf.points.end(), [](const PointType &a, const PointType &b) {
     return a.curvature < b.curvature;
   });
+}
+
+void Preprocess::lxcamera_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, const cv::Mat &img_msg)
+{
+  // 1. 清空上一帧的缓存
+    pl_surf.clear();
+    pl_corn.clear();
+    pl_full.clear();
+
+    // 2. 获取点云总点数和图像尺寸
+    int plsize = msg->width * msg->height;
+    if (plsize == 0 || img_msg.empty()) 
+    {
+        return;
+    }
+    
+    pl_surf.reserve(plsize);
+
+    int img_w = img_msg.cols;
+    int img_h = img_msg.rows;
+
+    // printf("[ Preprocess ] LxCamera input point number: %d (Img_W: %d, Img_H: %d)\n", plsize, img_w, img_h);
+
+    // 3. 设置 ROS2 点云迭代器
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+
+    // 4. 单层循环遍历所有点
+    for (int idx = 0; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z, ++idx)
+    {
+        // 降采样滤波
+        if (idx % point_filter_num != 0) continue;
+
+        float x = *iter_x;
+        float y = *iter_y;
+        float z = *iter_z;
+
+        // 滤除无效点 (NaN)
+        if (std::isnan(x) || std::isnan(y) || std::isnan(z)) continue;
+
+        // 滤除过近的盲区点
+        double range = x * x + y * y + z * z;
+        if (range < blind_sqr) continue;
+
+        // 5. 将 1D 点云索引还原为 2D 图像像素坐标 (核心修复点)
+        int v = idx / img_w; // 行号 (对应高度 y)
+        int u = idx % img_w; // 列号 (对应宽度 x)
+
+        PointType added_pt;
+        added_pt.x = x;
+        added_pt.y = y;
+        added_pt.z = z;
+
+        // 6. 安全地提取对应的图像 Intensity
+        if (v < img_h && u < img_w)
+        {
+            added_pt.intensity = static_cast<float>(img_msg.at<uint16_t>(v, u));
+        }
+        else
+        {
+            // 正常情况下，只要点云点数和图像像素严格对应，这里不会被触发
+            // printf("[ Preprocess ] Index out of range: (v: %d, u: %d)\n", v, u);
+            added_pt.intensity = 0.0f;
+        }
+
+        // 7. 兼容性处理 (根据你的 PointType 定义选择性保留)
+        // 注意：如果你在 FAST-LIVO2 中的 PointType 严格被 typedef 为 pcl::PointXYZI，
+        // 那么下面这四行代码在编译时会报错，直接删掉即可。
+        // 如果你的 PointType 实际上是 pcl::PointXYZINormal，则可以保留它们以防未初始化。
+        /*
+        added_pt.normal_x  = 0;
+        added_pt.normal_y  = 0;
+        added_pt.normal_z  = 0;
+        added_pt.curvature = 0.0f; // ToF全局快门，时间偏移设为0
+        */
+
+        pl_surf.points.push_back(added_pt);
+    }
+
+    // printf("[ Preprocess ] LxCamera output point number: %zu \n", pl_surf.points.size());
 }
 
 void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &types)

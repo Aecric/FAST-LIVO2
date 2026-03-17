@@ -16,6 +16,7 @@ which is included as part of this source code package.
 #include "common_lib.h"
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <pcl_conversions/pcl_conversions.h>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 using namespace std;
 
@@ -157,6 +158,7 @@ public:
 
   void process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg, PointCloudXYZI::Ptr &pcl_out);
   void process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, PointCloudXYZI::Ptr &pcl_out);
+  void process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, PointCloudXYZI::Ptr &pcl_out, const cv::Mat &img_msg);
   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
 
   // sensor_msgs::msg::PointCloud2::ConstSharedPtr pointcloud;
@@ -179,6 +181,7 @@ private:
   void Pandar128_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void robosense_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void l515_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+  void lxcamera_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, const cv::Mat &img_msg);
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
   void pub_func(PointCloudXYZI &pl, const rclcpp::Time &ct);
   int plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);

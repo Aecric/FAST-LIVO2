@@ -147,10 +147,36 @@ ament_target_dependencies(pre ${dependencies})
 ament_target_dependencies(imu_proc ${dependencies})
 ament_target_dependencies(laser_mapping ${dependencies})
 
+# Find vikit shared libraries explicitly (vikit_common_LIBRARIES is empty in its config)
+find_library(VIKIT_COMMON_LIB vikit_common
+  HINTS
+    ${CMAKE_SOURCE_DIR}/../../install/vikit_common/lib
+    ${CMAKE_SOURCE_DIR}/../../rpg_vikit/vikit_common/lib
+    /home/anaple/slamtest/install/vikit_common/lib
+    ./install/vikit_common/lib
+    /usr/local/lib
+  NO_DEFAULT_PATH
+)
+find_library(VIKIT_ROS_LIB vikit_ros
+  HINTS
+    ${CMAKE_SOURCE_DIR}/../../install/vikit_ros/lib
+    /home/anaple/slamtest/install/vikit_ros/lib
+    /usr/local/lib
+  NO_DEFAULT_PATH
+)
+if(NOT VIKIT_COMMON_LIB)
+  message(FATAL_ERROR "libvikit_common.so not found. Build vikit_common first.")
+endif()
+if(NOT VIKIT_ROS_LIB)
+  message(FATAL_ERROR "libvikit_ros.so not found. Build vikit_ros first.")
+endif()
+message(STATUS "Found vikit_common: ${VIKIT_COMMON_LIB}")
+message(STATUS "Found vikit_ros:    ${VIKIT_ROS_LIB}")
+
 # linking libraries or executables to public dependencies
-target_link_libraries(laser_mapping 
-    ${CMAKE_SOURCE_DIR}/../../install/vikit_common/lib/libvikit_common.so 
-    ${CMAKE_SOURCE_DIR}/../../install/vikit_ros/lib/libvikit_ros.so
+target_link_libraries(laser_mapping
+    ${VIKIT_COMMON_LIB}
+    ${VIKIT_ROS_LIB}
     ${COMMON_DEPENDENCIES}
 )
 target_link_libraries(vio ${COMMON_DEPENDENCIES})
