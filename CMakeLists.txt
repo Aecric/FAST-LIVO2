@@ -95,6 +95,7 @@ find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Sophus REQUIRED)
+add_compile_definitions(SOPHUS_USE_BASIC_LOGGING=1)
 find_package(Boost REQUIRED COMPONENTS thread)
 find_package(fmt REQUIRED)
 
@@ -217,6 +218,13 @@ install(
   DIRECTORY config launch rviz_cfg
   DESTINATION share/${PROJECT_NAME}
 )
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_odin_preprocess test/test_odin_preprocess.cpp)
+  target_link_libraries(test_odin_preprocess pre)
+  ament_target_dependencies(test_odin_preprocess sensor_msgs)
+endif()
 
 # Export dependencies
 ament_export_dependencies(

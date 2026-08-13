@@ -47,7 +47,8 @@ enum LID_TYPE
   XT32 = 5,
   PANDAR128 = 6,
   ROBOSENSE = 7,
-  LXCAMERA = 8
+  LXCAMERA = 8,
+  ODIN = 9
 };
 enum SLAM_MODE
 {

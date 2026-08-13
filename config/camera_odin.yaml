@@ -1,0 +1,16 @@
+/**:
+  ros__parameters:
+    # Placeholder used only when common.img_en is 1. Replace all values before
+    # enabling visual fusion.
+    cam_model: Pinhole
+    cam_width: 640
+    cam_height: 544
+    scale: 1.0
+    cam_fx: 500.0
+    cam_fy: 500.0
+    cam_cx: 320.0
+    cam_cy: 272.0
+    cam_d0: 0.0
+    cam_d1: 0.0
+    cam_d2: 0.0
+    cam_d3: 0.0

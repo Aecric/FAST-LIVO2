@@ -15,10 +15,11 @@ which is included as part of this source code package.
 #define RETURN0 0x00
 #define RETURN0AND1 0x10
 
-Preprocess::Preprocess() : feature_enabled(0), lidar_type(AVIA), blind(0.01), point_filter_num(1)
+Preprocess::Preprocess()
+    : lidar_type(AVIA), point_filter_num(1), N_SCANS(6), odin_confidence_threshold(0), blind(0.01),
+      blind_sqr(0.0001), feature_enabled(false), given_offset_time(false)
 {
   inf_bound = 10;
-  N_SCANS = 6;
   group_size = 8;
   disA = 0.01;
   disA = 0.1; // B?
@@ -33,8 +34,6 @@ Preprocess::Preprocess() : feature_enabled(0), lidar_type(AVIA), blind(0.01), po
   edgeb = 0.1;
   smallp_intersect = 172.5;
   smallp_ratio = 1.2;
-  given_offset_time = false;
-
   jump_up_limit = cos(jump_up_limit / 180 * M_PI);
   jump_down_limit = cos(jump_down_limit / 180 * M_PI);
   cos160 = cos(cos160 / 180 * M_PI);
@@ -48,6 +47,7 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
   feature_enabled = feat_en;
   lidar_type = lid_type;
   blind = bld;
+  blind_sqr = blind * blind;
   point_filter_num = pfilt_num;
 }
 
@@ -91,6 +91,10 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &ms
     robosense_handler(msg);
     break;
 
+  case ODIN:
+    odin_handler(msg);
+    break;
+
   // case LXCAMERA:
   //   lxcamera_handler(msg);
   //   break;
@@ -100,6 +104,119 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &ms
     break;
   }
   *pcl_out = pl_surf;
+}
+
+namespace
+{
+const sensor_msgs::msg::PointField *find_field(const sensor_msgs::msg::PointCloud2 &msg, const char *name)
+{
+  const auto it = std::find_if(msg.fields.begin(), msg.fields.end(), [name](const auto &field) {
+    return field.name == name;
+  });
+  return it == msg.fields.end() ? nullptr : &*it;
+}
+
+bool field_is(const sensor_msgs::msg::PointField *field, uint8_t datatype, uint32_t size,
+              uint32_t point_step)
+{
+  return field != nullptr && field->datatype == datatype && field->count == 1 &&
+         field->offset + size <= point_step;
+}
+
+float load_float32(const uint8_t *point, uint32_t offset)
+{
+  float value;
+  std::memcpy(&value, point + offset, sizeof(value));
+  return value;
+}
+} // namespace
+
+void Preprocess::odin_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
+{
+  pl_surf.clear();
+  pl_corn.clear();
+  pl_full.clear();
+
+  using PointField = sensor_msgs::msg::PointField;
+  const auto *field_x = find_field(*msg, "x");
+  const auto *field_y = find_field(*msg, "y");
+  const auto *field_z = find_field(*msg, "z");
+  const auto *field_intensity = find_field(*msg, "intensity");
+  const auto *field_confidence = find_field(*msg, "confidence");
+  const auto *field_offset_time = find_field(*msg, "offset_time");
+
+  const bool fields_valid =
+      field_is(field_x, PointField::FLOAT32, sizeof(float), msg->point_step) &&
+      field_is(field_y, PointField::FLOAT32, sizeof(float), msg->point_step) &&
+      field_is(field_z, PointField::FLOAT32, sizeof(float), msg->point_step) &&
+      field_is(field_intensity, PointField::UINT8, sizeof(uint8_t), msg->point_step) &&
+      field_is(field_confidence, PointField::UINT8, sizeof(uint8_t), msg->point_step) &&
+      field_is(field_offset_time, PointField::FLOAT32, sizeof(float), msg->point_step);
+  if (!fields_valid || msg->is_bigendian)
+  {
+    std::cerr << "[Preprocess] Invalid Odin PointCloud2 layout; expected little-endian "
+                 "x/y/z(float32), intensity/confidence(uint8), offset_time(float32)"
+              << std::endl;
+    return;
+  }
+
+  if (msg->point_step == 0 || msg->row_step < msg->width * msg->point_step ||
+      msg->data.size() < static_cast<size_t>(msg->row_step) * msg->height)
+  {
+    std::cerr << "[Preprocess] Truncated Odin PointCloud2 payload" << std::endl;
+    return;
+  }
+
+  const int filter_num = std::max(1, point_filter_num);
+  const int confidence_threshold = std::clamp(odin_confidence_threshold, 0, 255);
+  pl_surf.reserve(static_cast<size_t>(msg->width) * msg->height / filter_num + 1);
+
+  size_t input_index = 0;
+  for (uint32_t row = 0; row < msg->height; ++row)
+  {
+    for (uint32_t column = 0; column < msg->width; ++column, ++input_index)
+    {
+      if (input_index % filter_num != 0) continue;
+
+      const uint8_t *point = msg->data.data() + static_cast<size_t>(row) * msg->row_step +
+                             static_cast<size_t>(column) * msg->point_step;
+      const float x = load_float32(point, field_x->offset);
+      const float y = load_float32(point, field_y->offset);
+      const float z = load_float32(point, field_z->offset);
+      const float offset_time_seconds = load_float32(point, field_offset_time->offset);
+      const uint8_t intensity = point[field_intensity->offset];
+      const uint8_t confidence = point[field_confidence->offset];
+
+      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
+          !std::isfinite(offset_time_seconds) || offset_time_seconds < 0.0f ||
+          confidence < confidence_threshold)
+      {
+        continue;
+      }
+
+      const double range_squared = static_cast<double>(x) * x + static_cast<double>(y) * y +
+                                   static_cast<double>(z) * z;
+      if (range_squared < blind_sqr) continue;
+
+      PointType added_pt;
+      added_pt.x = x;
+      added_pt.y = y;
+      added_pt.z = z;
+      added_pt.intensity = static_cast<float>(intensity);
+      added_pt.normal_x = 0.0f;
+      added_pt.normal_y = 0.0f;
+      added_pt.normal_z = 0.0f;
+      // FAST-LIVO2 stores point-relative time in curvature, in milliseconds.
+      // Odin publishes offset_time as seconds from the scan header timestamp.
+      added_pt.curvature = offset_time_seconds * 1000.0f;
+      pl_surf.push_back(added_pt);
+    }
+  }
+
+  std::stable_sort(pl_surf.points.begin(), pl_surf.points.end(),
+                   [](const PointType &lhs, const PointType &rhs) {
+                     return lhs.curvature < rhs.curvature;
+                   });
 }
 
 void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg)

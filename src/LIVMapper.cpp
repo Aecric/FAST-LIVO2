@@ -80,6 +80,21 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->declare_parameter<bool>("uav.imu_rate_odom", false);
   this->node->declare_parameter<bool>("uav.gravity_align_en", false);
 
+  // Camera parameters are loaded directly into laserMapping. This avoids the
+  // demo_nodes_cpp parameter_blackboard dependency used by the old launches.
+  this->node->declare_parameter<std::string>("cam_model", "Pinhole");
+  this->node->declare_parameter<int>("cam_width", 0);
+  this->node->declare_parameter<int>("cam_height", 0);
+  this->node->declare_parameter<double>("scale", 1.0);
+  this->node->declare_parameter<double>("cam_fx", 0.0);
+  this->node->declare_parameter<double>("cam_fy", 0.0);
+  this->node->declare_parameter<double>("cam_cx", 0.0);
+  this->node->declare_parameter<double>("cam_cy", 0.0);
+  this->node->declare_parameter<double>("cam_d0", 0.0);
+  this->node->declare_parameter<double>("cam_d1", 0.0);
+  this->node->declare_parameter<double>("cam_d2", 0.0);
+  this->node->declare_parameter<double>("cam_d3", 0.0);
+
   this->node->declare_parameter<std::string>("evo.seq_name", "01");
   this->node->declare_parameter<bool>("evo.pose_output_en", false);
   this->node->declare_parameter<double>("imu.gyr_cov", 1.0);
@@ -96,6 +111,7 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->declare_parameter<int>("preprocess.scan_line",6);
   this->node->declare_parameter<int>("preprocess.point_filter_num", 3);
   this->node->declare_parameter<bool>("preprocess.feature_extract_enabled", false);
+  this->node->declare_parameter<int>("preprocess.odin_confidence_threshold", 0);
 
   this->node->declare_parameter<int>("pcd_save.interval", -1);
   this->node->declare_parameter<bool>("pcd_save.pcd_save_en", false);
@@ -160,6 +176,8 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("preprocess.scan_line", p_pre->N_SCANS);
   this->node->get_parameter("preprocess.point_filter_num", p_pre->point_filter_num);
   this->node->get_parameter("preprocess.feature_extract_enabled", p_pre->feature_enabled);
+  this->node->get_parameter("preprocess.odin_confidence_threshold", p_pre->odin_confidence_threshold);
+  p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 
   this->node->get_parameter("pcd_save.interval", pcd_save_interval);
   this->node->get_parameter("pcd_save.pcd_save_en", pcd_save_en);
@@ -193,42 +211,32 @@ void LIVMapper::initializeComponents(rclcpp::Node::SharedPtr &node)
   voxelmap_manager->extT_ << VEC_FROM_ARRAY(extrinT);
   voxelmap_manager->extR_ << MAT_FROM_ARRAY(extrinR);
 
-  // Wait for parameter_blackboard to be ready before loading camera params.
-  // Both nodes start simultaneously so we retry up to 10 times (5 seconds total).
+  // Camera calibration and VIO are not required in LiDAR-inertial-only mode.
+  if (img_en)
   {
-    bool cam_loaded = false;
-    for (int attempt = 0; attempt < 10 && !cam_loaded; ++attempt)
-    {
-      cam_loaded = vk::camera_loader::loadFromRosNs(this->node, "parameter_blackboard", vio_manager->cam);
-      if (!cam_loaded)
-      {
-        RCLCPP_WARN(this->node->get_logger(),
-          "Camera model not loaded from parameter_blackboard (attempt %d/10). "
-          "Waiting 500ms for parameter_blackboard to become ready...", attempt + 1);
-        rclcpp::sleep_for(std::chrono::milliseconds(500));
-      }
-    }
+    const bool cam_loaded =
+      vk::camera_loader::loadFromRosNs(this->node, "", vio_manager->cam);
     if (!cam_loaded) throw std::runtime_error("Camera model not correctly specified.");
-  }
 
-  vio_manager->grid_size = grid_size;
-  vio_manager->patch_size = patch_size;
-  vio_manager->outlier_threshold = outlier_threshold;
-  vio_manager->setImuToLidarExtrinsic(extT, extR);
-  vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT);
-  vio_manager->state = &_state;
-  vio_manager->state_propagat = &state_propagat;
-  vio_manager->max_iterations = max_iterations;
-  vio_manager->img_point_cov = IMG_POINT_COV;
-  vio_manager->normal_en = normal_en;
-  vio_manager->inverse_composition_en = inverse_composition_en;
-  vio_manager->raycast_en = raycast_en;
-  vio_manager->grid_n_width = grid_n_width;
-  vio_manager->grid_n_height = grid_n_height;
-  vio_manager->patch_pyrimid_level = patch_pyrimid_level;
-  vio_manager->exposure_estimate_en = exposure_estimate_en;
-  vio_manager->colmap_output_en = colmap_output_en;
-  vio_manager->initializeVIO();
+    vio_manager->grid_size = grid_size;
+    vio_manager->patch_size = patch_size;
+    vio_manager->outlier_threshold = outlier_threshold;
+    vio_manager->setImuToLidarExtrinsic(extT, extR);
+    vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT);
+    vio_manager->state = &_state;
+    vio_manager->state_propagat = &state_propagat;
+    vio_manager->max_iterations = max_iterations;
+    vio_manager->img_point_cov = IMG_POINT_COV;
+    vio_manager->normal_en = normal_en;
+    vio_manager->inverse_composition_en = inverse_composition_en;
+    vio_manager->raycast_en = raycast_en;
+    vio_manager->grid_n_width = grid_n_width;
+    vio_manager->grid_n_height = grid_n_height;
+    vio_manager->patch_pyrimid_level = patch_pyrimid_level;
+    vio_manager->exposure_estimate_en = exposure_estimate_en;
+    vio_manager->colmap_output_en = colmap_output_en;
+    vio_manager->initializeVIO();
+  }
 
   p_imu->set_extrinsic(extT, extR);
   p_imu->set_gyr_cov_scale(V3D(gyr_cov, gyr_cov, gyr_cov));
@@ -278,14 +286,12 @@ void LIVMapper::initializeSubscribersAndPublishers(rclcpp::Node::SharedPtr &node
   image_transport::ImageTransport it(this->node);
   if (p_pre->lidar_type == AVIA) {
     sub_pcl = this->node->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 200000, std::bind(&LIVMapper::livox_pcl_cbk, this, std::placeholders::_1));
-  } 
-  if (p_pre->lidar_type == 8){
+  } else if (p_pre->lidar_type == LXCAMERA) {
     sub_pcl = this->node->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, 200000, std::bind(&LIVMapper::lxcamera_pcl_cbk, this, std::placeholders::_1));
     sub_amp_camera =  this->node->create_subscription<sensor_msgs::msg::Image>(amp_camera_topic, 200000, std::bind(&LIVMapper::amp_camera_cbk, this, std::placeholders::_1));
-  } 
-  // else {
-  //   sub_pcl = this->node->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, 200000, std::bind(&LIVMapper::standard_pcl_cbk, this, std::placeholders::_1));
-  // }
+  } else {
+    sub_pcl = this->node->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, 200000, std::bind(&LIVMapper::standard_pcl_cbk, this, std::placeholders::_1));
+  }
   sub_imu = this->node->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 200000, std::bind(&LIVMapper::imu_cbk, this, std::placeholders::_1));
   sub_img = this->node->create_subscription<sensor_msgs::msg::Image>(img_topic, 200000, std::bind(&LIVMapper::img_cbk, this, std::placeholders::_1));
   

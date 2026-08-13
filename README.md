@@ -193,6 +193,51 @@ ros2 launch fast_livo mapping_aviz.launch.py use_rviz:=True
 ros2 bag play -p Retail_Street  # space bar controls play/pause
 ```
 
-## 5. License
+## 5. Odin2 support
+
+This fork accepts the packed `sensor_msgs/msg/PointCloud2` published by
+`odin_ros_driver2` on `/manifold/ODIN2/device0/cloud/raw`. Select it with
+`preprocess.lidar_type: 9`. The expected fields are:
+
+| field | type | unit |
+| --- | --- | --- |
+| `x`, `y`, `z` | `float32` | metre |
+| `intensity`, `confidence` | `uint8` | raw |
+| `offset_time` | `float32` | second from the cloud header stamp |
+
+The Odin preprocessor safely reads the unaligned `offset_time` field at byte
+14 and converts seconds to the millisecond value stored in FAST-LIVO2's
+`curvature`. Start in LiDAR-inertial mode:
+
+```bash
+ros2 launch fast_livo mapping_odin.launch.py
+```
+
+The Odin launch loads camera parameters directly into `laserMapping`; it does
+not require the `demo_nodes_cpp/parameter_blackboard` node.
+
+The ROS 2 Jazzy build was verified with the image and workspace under
+`/home/aecriclin/3d_slam_ws/docker`. Mount this checkout over the workspace
+package when entering that container:
+
+```bash
+docker run --rm -it --network host \
+  -v /home/aecriclin/3d_slam_ws:/root/slam_ws \
+  -v /home/aecriclin/opensource/FAST-LIVO2:/root/slam_ws/src/FAST-LIVO2 \
+  -w /root/slam_ws ros2test-jazzy:dev bash
+
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch fast_livo mapping_odin.launch.py use_rviz:=False
+```
+
+Before running, enable `cloud/raw` and `imu` in the Odin driver. Each IMU sample
+is expected to carry its own `OdinImuSample::timestamp`; the driver falls back
+to the packet timestamp only for legacy samples. The identity LiDAR-IMU
+transform in `config/odin.yaml` is only a placeholder and must be replaced with
+the device calibration. `common.img_en` defaults to `0`; replace the camera
+intrinsics and LiDAR-camera extrinsics before enabling visual fusion.
+
+## 6. License
 
 The source code of this package is released under the [**GPLv2**](http://www.gnu.org/licenses/) license. For commercial use, please contact me at <zhengcr@connect.hku.hk> and Prof. Fu Zhang at <fuzhang@hku.hk> to discuss an alternative license.

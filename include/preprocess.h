@@ -166,6 +166,7 @@ public:
   PointCloudXYZI pl_buff[128]; // maximum 128 line lidar
   vector<orgtype> typess[128]; // maximum 128 line lidar
   int lidar_type, point_filter_num, N_SCANS;
+  int odin_confidence_threshold;
   
   double blind, blind_sqr;
   bool feature_enabled, given_offset_time;
@@ -181,6 +182,7 @@ private:
   void Pandar128_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void robosense_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void l515_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+  void odin_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void lxcamera_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, const cv::Mat &img_msg);
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
   void pub_func(PointCloudXYZI &pl, const rclcpp::Time &ct);
