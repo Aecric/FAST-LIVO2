@@ -139,6 +139,30 @@ colcon build --symlink-install --continue-on-error
 source ~/fast_ws/install/setup.bash
 ```
 
+### Debian packages
+
+Git tags beginning with `v` trigger `.github/workflows/deb-release.yml`. The
+workflow builds native `amd64` and `arm64` packages for ROS 2 Humble on Ubuntu
+22.04 and publishes them to the matching GitHub Release. A manual run can use a
+release tag or create a timestamped development prerelease.
+
+Each Release contains four packages per architecture:
+
+- `ros-humble-fast-livo`: FAST-LIVO2 core algorithm and launch/config files
+- `ros-humble-livox-ros-driver2`: pinned from `Aecric/livox_ros_driver2`
+- `ros-humble-vikit-common` and `ros-humble-vikit-ros`: pinned from
+  `Aecric/rpg_vikit`
+
+Install the four files for the target architecture together so APT can resolve
+their system and ROS dependencies:
+
+```bash
+sudo apt install ./*.deb
+```
+
+For a local Docker Buildx build, run `./build_deb.sh`. Output is written under
+`debs/<ros-distro>-<architecture>/` by default.
+
 ## 4. Run our examples
 
 Download our collected rosbag files via OneDrive ([**FAST-LIVO2-Dataset**](https://connecthkuhk-my.sharepoint.com/:f:/g/personal/zhengcr_connect_hku_hk/ErdFNQtjMxZOorYKDTtK4ugBkogXfq1OfDm90GECouuIQA?e=KngY9Z)). 

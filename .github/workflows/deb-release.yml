@@ -1,0 +1,124 @@
+name: Build and Release ROS 2 DEBs
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag; empty creates a development snapshot
+        required: false
+        default: ''
+        type: string
+      build_jobs:
+        description: Parallel build jobs
+        required: false
+        default: '4'
+        type: string
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - id: version
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -eu
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            TAG="${GITHUB_REF_NAME}"
+            PRERELEASE=false
+          elif [ -n "${INPUT_TAG}" ]; then
+            TAG="${INPUT_TAG}"
+            PRERELEASE=false
+          else
+            TAG="build-$(date -u +'%Y%m%d-%H%M%S')"
+            PRERELEASE=true
+          fi
+          if [ "${PRERELEASE}" = true ]; then
+            VERSION="0.0.0~dev.$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          else
+            VERSION="${TAG#v}"
+          fi
+          if ! echo "${VERSION}" | grep -qE '^[0-9][0-9A-Za-z.+~]*$'; then
+            echo "::error::Invalid Debian version ${VERSION} derived from ${TAG}"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=${PRERELEASE}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: setup
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04, platform: linux/amd64}
+          - {arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    name: humble-jammy-${{ matrix.arch }}
+    env:
+      ROS_DISTRO: humble
+      UBUNTU_CODENAME: jammy
+      VIKIT_DEB_TAG: v0.1.0
+      LIVOX_DEB_TAG: 1.2.6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set package version
+        env:
+          PACKAGE_VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          set -eu
+          sed -i -E "s|<version>[^<]*</version>|<version>${PACKAGE_VERSION}</version>|" package.xml
+          grep -n '<version>' package.xml
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+      - name: Build core and collect dependency DEBs
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: export
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            ROS_DISTRO=${{ env.ROS_DISTRO }}
+            UBUNTU_CODENAME=${{ env.UBUNTU_CODENAME }}
+            BUILD_JOBS=${{ inputs.build_jobs || '4' }}
+            VIKIT_DEB_TAG=${{ env.VIKIT_DEB_TAG }}
+            LIVOX_DEB_TAG=${{ env.LIVOX_DEB_TAG }}
+          cache-from: type=gha,scope=fast-livo-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=fast-livo-${{ matrix.arch }}
+          outputs: type=local,dest=./deb_output
+      - name: Inspect packages
+        run: |
+          set -eu
+          test "$(find deb_output -name '*.deb' | wc -l)" -eq 4
+          find deb_output -name '*.deb' -exec dpkg-deb --info {} \;
+          find deb_output -name '*.deb' -exec sha256sum {} \; | sort > deb_output/SHA256SUMS-${{ matrix.arch }}
+      - name: Publish packages
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.setup.outputs.tag }}
+          name: FAST-LIVO2 ROS 2 DEBs ${{ needs.setup.outputs.tag }}
+          body: |
+            FAST-LIVO2 packages for ROS 2 Humble on Ubuntu 22.04 (Jammy).
+
+            Each architecture includes the FAST-LIVO2 core and its pinned dependencies:
+            `livox_ros_driver2`, `vikit_common`, and `vikit_ros`.
+
+            Install all matching-architecture packages together:
+            `sudo apt install ./*.deb`
+          files: |
+            deb_output/*.deb
+            deb_output/SHA256SUMS-*
+          prerelease: ${{ needs.setup.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.setup.outputs.prerelease != 'true' }}

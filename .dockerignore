@@ -1,0 +1,17 @@
+.git
+.github
+.vscode
+.idea
+.agents
+.codex
+build/
+install/
+log/
+Log/
+debs/
+*.deb
+*.ddeb
+*.buildinfo
+*.changes
+__pycache__/
+*.pyc
