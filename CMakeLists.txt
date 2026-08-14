@@ -7,6 +7,7 @@ message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+option(FAST_LIVO_NATIVE_ARCH "Tune binaries for the build host CPU" ON)
 
 # Set common compile options
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -fexceptions")
@@ -20,9 +21,14 @@ message(STATUS "Current CPU architecture: ${CMAKE_SYSTEM_PROCESSOR}")
 # Specific settings for Release build
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM|AARCH64)")
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    # 64-bit ARM optimizations (e.g., RK3588 and Jetson Orin NX)
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -mcpu=native -mtune=native -ffast-math")
-    message(STATUS "Using 64-bit ARM optimizations: -O3 -mcpu=native -mtune=native -ffast-math")
+    if(FAST_LIVO_NATIVE_ARCH)
+      # 64-bit ARM optimizations (e.g., RK3588 and Jetson Orin NX)
+      set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -mcpu=native -mtune=native -ffast-math")
+      message(STATUS "Using native 64-bit ARM optimizations")
+    else()
+      set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=armv8-a -ffast-math")
+      message(STATUS "Using portable 64-bit ARM optimizations: -march=armv8-a")
+    endif()
   else()
     # 32-bit ARM optimizations with NEON support
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -mcpu=native -mtune=native -mfpu=neon -ffast-math")
@@ -31,8 +37,13 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM|AARCH64)")
   add_definitions(-DARM_ARCH)
 else()
   # x86-64 (Intel/AMD) optimizations
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -mtune=native -funroll-loops") #-flto
-  message(STATUS "Using general x86 optimizations: -O3 -march=native -mtune=native -funroll-loops") 
+  if(FAST_LIVO_NATIVE_ARCH)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -mtune=native -funroll-loops") #-flto
+    message(STATUS "Using native x86-64 optimizations")
+  else()
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=x86-64 -mtune=generic -funroll-loops")
+    message(STATUS "Using portable x86-64 optimizations: -march=x86-64 -mtune=generic")
+  endif()
   add_definitions(-DX86_ARCH)
 endif()
 
@@ -127,7 +138,7 @@ set(dependencies
   livox_ros_driver2
 )
 
-set(COMMON_DEPENDENCIES OpenMP::OpenMP_CXX fmt::fmt)
+set(COMMON_DEPENDENCIES OpenMP::OpenMP_CXX fmt::fmt Sophus::Sophus)
 
 # link_directories(${COMMON_DEPENDENCIES}
 #   ${vikit_common_LIBRARIES}/libvikit_common.so
@@ -151,19 +162,21 @@ ament_target_dependencies(laser_mapping ${dependencies})
 # Find vikit shared libraries explicitly (vikit_common_LIBRARIES is empty in its config)
 find_library(VIKIT_COMMON_LIB vikit_common
   HINTS
-    ${CMAKE_SOURCE_DIR}/../../install/vikit_common/lib
-    ${CMAKE_SOURCE_DIR}/../../rpg_vikit/vikit_common/lib
-    /home/anaple/slamtest/install/vikit_common/lib
-    ./install/vikit_common/lib
-    /usr/local/lib
-  NO_DEFAULT_PATH
+    ${CMAKE_PREFIX_PATH}
+    ${CMAKE_SOURCE_DIR}/../../install/vikit_common
+    ${CMAKE_SOURCE_DIR}/../../rpg_vikit/vikit_common
+    /home/anaple/slamtest/install/vikit_common
+    ./install/vikit_common
+    /usr/local
+  PATH_SUFFIXES lib
 )
 find_library(VIKIT_ROS_LIB vikit_ros
   HINTS
-    ${CMAKE_SOURCE_DIR}/../../install/vikit_ros/lib
-    /home/anaple/slamtest/install/vikit_ros/lib
-    /usr/local/lib
-  NO_DEFAULT_PATH
+    ${CMAKE_PREFIX_PATH}
+    ${CMAKE_SOURCE_DIR}/../../install/vikit_ros
+    /home/anaple/slamtest/install/vikit_ros
+    /usr/local
+  PATH_SUFFIXES lib
 )
 if(NOT VIKIT_COMMON_LIB)
   message(FATAL_ERROR "libvikit_common.so not found. Build vikit_common first.")
